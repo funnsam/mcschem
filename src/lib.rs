@@ -1,3 +1,16 @@
+#![warn(
+    clippy::complexity,
+    clippy::correctness,
+    clippy::perf,
+    clippy::nursery,
+    clippy::suspicious,
+    clippy::style,
+)]
+#![allow(
+    clippy::semicolon_inside_block,
+    clippy::just_underscores_and_digits,
+)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::fmt;
