@@ -15,8 +15,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::fmt;
 use std::str::FromStr;
+use quartz_nbt as nbt;
 
-pub const MC_1_18_2: i32 = 2975;
+pub mod data_version;
+pub mod utils;
 
 /// A struct holding infomation about a schematic
 #[derive(Debug, Clone)]
@@ -41,14 +43,31 @@ pub struct Block {
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum BlockEntity {
+    /// Represents a barrel
     Barrel {
         items: Vec<ItemSlot>,
+    },
+    // /// A post-1.20 sign
+    // Sign {
+    // },
+    /// A pre-1.20 sign
+    SignPre1D20 {
+        glowing: bool,
+        color: String,
+        line_1: String,
+        line_2: String,
+        line_3: String,
+        line_4: String,
     },
 }
 
 /// An item slot in a container
 #[derive(Debug, Clone)]
 pub struct ItemSlot {
+    pub id: String,
+    pub extra: nbt::NbtCompound,
+    pub count: i8,
+    pub slot: i8,
 }
 
 impl FromStr for Block {
@@ -118,17 +137,37 @@ impl Schematic {
 
     /// Sets a block in the schematic
     pub fn set_block(&mut self, x: usize, y: usize, z: usize, block: Block) {
+        if x >= self.size_x as usize || y >= self.size_y as usize || z >= self.size_z as usize {
+            panic!("Set block to ({x}, {y}, {z}) which is out of bound");
+        }
+
         self.blocks[
             y * (self.size_x * self.size_z) as usize
                 + z * self.size_x as usize
                 + x
-        ] = block
+        ] = block;
     }
 
+    /// Sets a block entity in the schematic
+    pub fn set_block_entity(
+        &mut self,
+        x: usize, y: usize, z: usize,
+        block: Block, be: BlockEntity
+    ) {
+        if x >= self.size_x as usize || y >= self.size_y as usize || z >= self.size_z as usize {
+            panic!("Set block to ({x}, {y}, {z}) which is out of bound");
+        }
+
+        self.blocks[
+            y * (self.size_x * self.size_z) as usize
+                + z * self.size_x as usize
+                + x
+        ] = block;
+
+        self.block_entities.insert([x as u16, y as u16, z as u16], be);
+    }
     /// Export the schematic to a writer
     pub fn export<W: io::Write>(&self, writer: &mut W) -> Result<(), quartz_nbt::io::NbtIoError> {
-        use quartz_nbt as nbt;
-
         let mut palette = Vec::new();
         let mut block_data = Vec::new();
         for block in self.blocks.iter() {
@@ -152,22 +191,24 @@ impl Schematic {
 
         let mut block_entities = vec![];
         for (p, e) in self.block_entities.iter() {
-            block_entities.push(nbt::compound! {
+            let mut compound = nbt::compound! {
                 "Pos": [I; p[0] as i32, p[1] as i32, p[2] as i32],
-                // TODO:
-            });
+                "Id": e.id()
+            };
+            e.add_data(&mut compound);
+            block_entities.push(compound);
         }
 
         let schem = nbt::compound! {
             "Version": 2_i32,
             "DataVersion": self.data_version,
             "Metadata": nbt::compound! {
-                "WEOffsetX": 0_i32,
-                "WEOffsetY": 0_i32,
-                "WEOffsetZ": 0_i32,
-                "MCSchematicMetadata": nbt::compound! {
-                    "Generated": "Generated with rust crate `mcschem`"
-                },
+                // "WEOffsetX": 0_i32,
+                // "WEOffsetY": 0_i32,
+                // "WEOffsetZ": 0_i32,
+                // "MCSchematicMetadata": nbt::compound! {
+                //     "Generated": "Generated with rust crate `mcschem`"
+                // },
             },
             "Width": self.size_x as i16,
             "Height": self.size_y as i16,
@@ -181,5 +222,50 @@ impl Schematic {
         println!("{schem:#?}");
 
         nbt::io::write_nbt(writer, Some("Schematic"), &schem, nbt::io::Flavor::GzCompressed)
+    }
+}
+
+impl BlockEntity {
+    fn id(&self) -> &'static str {
+        match self {
+            Self::Barrel { .. } => "minecraft:barrel",
+            /* Self::Sign { .. } | */ Self::SignPre1D20 { .. } => "minecraft:sign",
+        }
+    }
+
+    fn add_data(&self, compound: &mut nbt::NbtCompound) {
+        match self {
+            Self::Barrel { items } => {
+                let mut items_nbt = Vec::with_capacity(items.len());
+
+                for i in items.iter() {
+                    items_nbt.push(i.to_compound());
+                }
+
+                compound.insert("Items", nbt::NbtList::from(items_nbt));
+            },
+            // Self::Sign {  } => {
+            //     todo!();
+            // },
+            Self::SignPre1D20 { glowing, color, line_1, line_2, line_3, line_4 } => {
+                compound.insert("GlowingText", *glowing as i8);
+                compound.insert("Color", color.clone());
+                compound.insert("Text1", line_1.clone());
+                compound.insert("Text2", line_2.clone());
+                compound.insert("Text3", line_3.clone());
+                compound.insert("Text4", line_4.clone());
+            },
+        }
+    }
+}
+
+impl ItemSlot {
+    fn to_compound(&self) -> nbt::NbtCompound {
+        nbt::compound! {
+            "Count": self.count,
+            "Slot": self.slot,
+            "id": self.id.clone(),
+            "tag": self.extra.clone()
+        }
     }
 }
