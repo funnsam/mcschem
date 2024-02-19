@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::fmt;
+use std::str::FromStr;
 
 pub const MC_1_18_2: i32 = 2975;
 
@@ -9,7 +10,7 @@ pub const MC_1_18_2: i32 = 2975;
 pub struct Schematic {
     data_version: i32,
 
-    blocks: Vec<Vec<Vec<Block>>>,
+    blocks: Vec<Block>,
     block_entities: HashMap<[u16; 3], BlockEntity>,
     size_x: u16,
     size_y: u16,
@@ -37,14 +38,9 @@ pub enum BlockEntity {
 pub struct ItemSlot {
 }
 
-impl Block {
-    /// Parse a block from a string
-    ///
-    /// # Example
-    /// ```rs
-    /// assert!(Block::from_str("minecraft:oak_log[axis=y]").is_ok());
-    /// ```
-    pub fn from_str(block: &str) -> Result<Self, ()> {
+impl FromStr for Block {
+    type Err = ();
+    fn from_str(block: &str) -> Result<Self, ()> {
         let (id, properties) = block
             .split_once('[')
             .map_or_else(
@@ -76,7 +72,7 @@ impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.id.fmt(f)?;
 
-        if self.properties.len() != 0 {
+        if !self.properties.is_empty() {
             write!(
                 f,
                 "[{}]",
@@ -99,11 +95,8 @@ impl Schematic {
             data_version,
 
             blocks: vec![
-                vec![
-                    vec![
-                        Block::from_str("minecraft:air").unwrap(); size_x as usize
-                    ]; size_z as usize
-                ]; size_y as usize
+                Block::from_str("minecraft:air").unwrap();
+                (size_x * size_y * size_z) as usize
             ],
             block_entities: HashMap::new(),
             size_x, size_y, size_z
@@ -112,7 +105,11 @@ impl Schematic {
 
     /// Sets a block in the schematic
     pub fn set_block(&mut self, x: usize, y: usize, z: usize, block: Block) {
-        self.blocks[y][z][x] = block
+        self.blocks[
+            y * (self.size_x * self.size_z) as usize
+                + z * self.size_x as usize
+                + x
+        ] = block
     }
 
     /// Export the schematic to a writer
@@ -121,22 +118,18 @@ impl Schematic {
 
         let mut palette = Vec::new();
         let mut block_data = Vec::new();
-        for y in self.blocks.iter() {
-            for z in y.iter() {
-                for block in z.iter() {
-                    if !palette.contains(block) {
-                        palette.push(block.clone());
-                    }
-
-                    let mut id = palette.iter().position(|v| v == block).unwrap();
-
-                    while id & 0x80 != 0 {
-                        block_data.push(id as u8 & 0x7F | 0x80);
-                        id >>= 7;
-                    }
-                    block_data.push(id as u8);
-                }
+        for block in self.blocks.iter() {
+            if !palette.contains(block) {
+                palette.push(block.clone());
             }
+
+            let mut id = palette.iter().position(|v| v == block).unwrap();
+
+            while id & 0x80 != 0 {
+                block_data.push(id as u8 as i8 & 0x7F | 0x80_u8 as i8);
+                id >>= 7;
+            }
+            block_data.push(id as u8 as i8);
         }
 
         let mut palette_nbt = nbt::NbtCompound::new();
@@ -155,13 +148,20 @@ impl Schematic {
         let schem = nbt::compound! {
             "Version": 2_i32,
             "DataVersion": self.data_version,
-            "Metadata": nbt::compound! {},
+            "Metadata": nbt::compound! {
+                "WEOffsetX": 0_i32,
+                "WEOffsetY": 0_i32,
+                "WEOffsetZ": 0_i32,
+                "MCSchematicMetadata": nbt::compound! {
+                    "Generated": "Generated with rust crate `mcschem`"
+                },
+            },
             "Width": self.size_x as i16,
             "Height": self.size_y as i16,
             "Length": self.size_z as i16,
-            "PaletteMax": (palette.len() - 1) as i32,
+            "PaletteMax": palette.len() as i32,
             "Palette": palette_nbt,
-            "BlockData": nbt::NbtList::from(block_data),
+            "BlockData": nbt::NbtTag::ByteArray(block_data),
             "BlockEntities": nbt::NbtList::from(block_entities),
         };
 
