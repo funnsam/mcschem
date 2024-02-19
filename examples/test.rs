@@ -13,7 +13,7 @@ fn main() {
 
     schem.set_block_entity(
         0, 1, 0,
-        mcschem::Block::from_str("minecraft:oak_sign[rotation=0,waterlogged=false]").unwrap(),
+        mcschem::Block::from_str("minecraft:oak_sign[rotation=8,waterlogged=false]").unwrap(),
         mcschem::BlockEntity::SignPre1D20 {
             glowing: true,
             color: "lime".to_string(),
